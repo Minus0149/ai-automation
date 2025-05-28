@@ -1,0 +1,41 @@
+FROM node:18-alpine AS base
+
+# Install dependencies only when needed
+FROM base AS deps
+RUN apk add --no-cache libc6-compat
+WORKDIR /app
+
+# Install dependencies for queue processor
+COPY queue/package.json queue/package-lock.json* ./
+RUN npm ci
+
+# Rebuild the source code only when needed
+FROM base AS builder
+WORKDIR /app
+COPY --from=deps /app/node_modules ./node_modules
+COPY queue ./queue
+COPY frontend/lib/shared ./frontend/lib/shared
+
+WORKDIR /app/queue
+RUN npm run build
+
+# Production image
+FROM base AS runner
+WORKDIR /app
+
+ENV NODE_ENV production
+
+RUN addgroup --system --gid 1001 nodejs
+RUN adduser --system --uid 1001 queueuser
+
+# Copy built application
+COPY --from=builder --chown=queueuser:nodejs /app/queue/dist ./
+COPY --from=builder --chown=queueuser:nodejs /app/queue/node_modules ./node_modules
+COPY --from=builder --chown=queueuser:nodejs /app/frontend/lib/shared ./frontend/lib/shared
+
+USER queueuser
+
+ENV REDIS_HOST=redis
+ENV DATABASE_URL=postgresql://postgres:password@postgres:5432/ai_automation_db
+
+CMD ["node", "processor.js"] 

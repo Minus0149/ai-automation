@@ -1,0 +1,191 @@
+version: "3.8"
+
+services:
+  # ===========================================
+  # PostgreSQL Database Service
+  # ===========================================
+  postgres:
+    image: postgres:15-alpine
+    container_name: ai-automation-postgres
+    environment:
+      # Database Configuration
+      POSTGRES_DB: ai_automation
+      POSTGRES_USER: automation_user
+      POSTGRES_PASSWORD: automation_password_2024
+
+      # Performance Settings
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --auth-local=scram-sha-256"
+
+      # Development Settings (override in production)
+      # POSTGRES_PASSWORD: ${DB_PASSWORD:-automation_password_2024}
+      # POSTGRES_USER: ${DB_USER:-automation_user}
+      # POSTGRES_DB: ${DB_NAME:-ai_automation}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U automation_user -d ai_automation"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - automation-network
+
+  # ===========================================
+  # Redis Cache & Queue Service
+  # ===========================================
+  redis:
+    image: redis:7-alpine
+    container_name: ai-automation-redis
+    command: redis-server --appendonly yes --requirepass redis_password_2024
+    environment:
+      # Redis Configuration
+      REDIS_PASSWORD: redis_password_2024
+
+      # Performance Settings
+      REDIS_MAXMEMORY: 256mb
+      REDIS_MAXMEMORY_POLICY: allkeys-lru
+
+      # Development Settings (override in production)
+      # REDIS_PASSWORD: ${REDIS_PASSWORD:-redis_password_2024}
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+      - ./docker/redis.conf:/usr/local/etc/redis/redis.conf
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "redis_password_2024", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - automation-network
+
+  # ===========================================
+  # PgAdmin Database Management UI
+  # ===========================================
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: ai-automation-pgadmin
+    environment:
+      # PgAdmin Configuration
+      PGADMIN_DEFAULT_EMAIL: admin@automation.com
+      PGADMIN_DEFAULT_PASSWORD: admin_password_2024
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
+
+      # Development Settings (override in production)
+      # PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@automation.com}
+      # PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin_password_2024}
+
+      # Security Settings for Production
+      # PGADMIN_CONFIG_ENHANCED_COOKIE_PROTECTION: 'True'
+      # PGADMIN_CONFIG_LOGIN_BANNER: "Unauthorized access is prohibited"
+      # PGADMIN_CONFIG_CONSOLE_LOG_LEVEL: 40
+    ports:
+      - "8080:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+      - ./docker/servers.json:/pgadmin4/servers.json
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - automation-network
+
+  # ===========================================
+  # Redis Commander Management UI
+  # ===========================================
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: ai-automation-redis-ui
+    environment:
+      # Redis Commander Configuration
+      REDIS_HOSTS: redis:redis:6379:0:redis_password_2024
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: redis_password_2024
+
+      # UI Configuration
+      HTTP_USER: admin
+      HTTP_PASSWORD: redis_ui_password_2024
+
+      # Development Settings (override in production)
+      # REDIS_PASSWORD: ${REDIS_PASSWORD:-redis_password_2024}
+      # HTTP_PASSWORD: ${REDIS_UI_PASSWORD:-redis_ui_password_2024}
+    ports:
+      - "8081:8081"
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - automation-network
+
+# ===========================================
+# Persistent Data Volumes
+# ===========================================
+volumes:
+  postgres_data:
+    name: ai_automation_postgres_data
+    driver: local
+  redis_data:
+    name: ai_automation_redis_data
+    driver: local
+  pgadmin_data:
+    name: ai_automation_pgadmin_data
+    driver: local
+
+# ===========================================
+# Docker Network Configuration
+# ===========================================
+networks:
+  automation-network:
+    name: ai_automation_network
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+# ===========================================
+# Environment Variable Examples
+# ===========================================
+#
+# For Production Deployment:
+# 1. Create .env file in project root with:
+#    DB_PASSWORD=secure_production_password
+#    DB_USER=prod_user
+#    DB_NAME=ai_automation_prod
+#    REDIS_PASSWORD=secure_redis_password
+#    PGADMIN_EMAIL=admin@yourcompany.com
+#    PGADMIN_PASSWORD=secure_pgadmin_password
+#    REDIS_UI_PASSWORD=secure_redis_ui_password
+#
+# 2. Use environment variable substitution:
+#    POSTGRES_PASSWORD: ${DB_PASSWORD}
+#    REDIS_PASSWORD: ${REDIS_PASSWORD}
+#
+# 3. Security Considerations:
+#    - Change all default passwords
+#    - Use strong passwords (min 16 characters)
+#    - Enable SSL/TLS for external access
+#    - Restrict network access with firewall rules
+#    - Use Docker secrets for sensitive data
+#    - Enable audit logging
+#
+# 4. Performance Tuning:
+#    - Increase memory limits for production
+#    - Configure PostgreSQL shared_buffers
+#    - Set Redis maxmemory based on usage
+#    - Use read replicas for scaling
+#
+# 5. Monitoring:
+#    - Add health check endpoints
+#    - Configure log aggregation
+#    - Set up metrics collection
+#    - Enable alerting for failures
+# ===========================================

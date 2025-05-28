@@ -1,0 +1,108 @@
+# ===========================================
+# AI Web Automation Agent - Python Worker Configuration
+# ===========================================
+
+# Worker Configuration
+# ====================
+# Copy this file to .env in the worker directory
+
+# Database Configuration (Docker PostgreSQL)
+DATABASE_URL="postgresql://automation_user:automation_password_2024@localhost:5432/ai_automation"
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=ai_automation
+DB_USER=automation_user
+DB_PASSWORD=automation_password_2024
+
+# Redis Configuration (Docker Redis)
+REDIS_URL="redis://:redis_password_2024@localhost:6379"
+REDIS_HOST=localhost
+REDIS_PORT=6379
+REDIS_PASSWORD=redis_password_2024
+
+# Worker Configuration
+HOST=0.0.0.0
+PORT=8000
+WORKER_TIMEOUT=120
+MAX_CONCURRENT_EXECUTIONS=3
+
+# Selenium Configuration
+CHROME_DRIVER_PATH=auto
+CHROME_BINARY_PATH=auto
+HEADLESS=true
+WINDOW_SIZE=1920x1080
+PAGE_LOAD_TIMEOUT=30
+IMPLICIT_WAIT=10
+
+# Screenshot Configuration
+SCREENSHOT_DIR=./screenshots
+SCREENSHOT_MAX_SIZE=2048
+SCREENSHOT_QUALITY=80
+MAX_SCREENSHOTS_PER_TASK=5
+
+# Performance Configuration
+MAX_MEMORY_MB=512
+MAX_CPU_PERCENT=80
+MAX_EXECUTION_TIME=300
+
+# Logging Configuration
+LOG_LEVEL=info
+LOG_FILE=./logs/worker.log
+VERBOSE_LOGGING=false
+
+# Security Configuration
+ALLOWED_DOMAINS=*
+BLOCK_PRIVATE_IPS=false
+
+# Development Configuration
+NODE_ENV=development
+DEBUG=true
+
+# Worker Server Configuration
+WORKER_HOST=0.0.0.0
+WORKER_PORT=8000
+WORKER_DEBUG=false
+WORKER_RELOAD=true
+
+# Chrome/ChromeDriver Configuration
+CHROME_OPTIONS=--no-sandbox,--disable-dev-shm-usage,--disable-gpu
+
+# Screenshot Configuration
+SCREENSHOT_ENABLED=true
+SCREENSHOT_FORMAT=png
+SCREENSHOT_PATH=/tmp/screenshots
+
+# Security Configuration
+CORS_ORIGINS=http://localhost:3000,http://localhost:8000
+API_RATE_LIMIT=60
+SANDBOX_MODE=true
+
+# Logging Configuration
+LOG_FORMAT=%(asctime)s - %(name)s - %(levelname)s - %(message)s
+LOG_FILE_PATH=/tmp/worker.log
+ENABLE_FILE_LOGGING=true
+
+# Performance Configuration
+MEMORY_LIMIT_MB=512
+CPU_LIMIT_PERCENT=80
+CLEANUP_TEMP_FILES=true
+
+# Development Configuration
+PYTHON_ENV=development
+DEBUG_MODE=false
+ENABLE_PROFILING=false
+
+# Browser Pool Configuration
+BROWSER_POOL_SIZE=2
+BROWSER_IDLE_TIMEOUT=300
+BROWSER_MAX_LIFETIME=3600
+
+# Error Handling Configuration
+MAX_RETRIES=3
+RETRY_DELAY=5
+CAPTURE_ERROR_SCREENSHOTS=true
+ERROR_SCREENSHOT_PATH=/tmp/error_screenshots
+
+# Health Check Configuration
+HEALTH_CHECK_INTERVAL=30
+HEALTH_CHECK_TIMEOUT=10 
