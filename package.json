@@ -1,45 +1,44 @@
 {
-  "name": "ai-web-automation-agent",
-  "version": "1.0.0",
+  "name": "enhanced-selenium-automation-langchain",
+  "version": "2.0.0",
   "private": true,
+  "description": "Enhanced Selenium Automation with LangChain AI - Complete project generation and intelligent automation",
   "workspaces": [
-    "frontend",
-    "queue"
+    "frontend"
   ],
   "scripts": {
-    "install:all": "npm install && cd frontend && npm install && cd ../queue && npm install && cd ../worker && pip install -r requirements.txt",
+    "install:all": "npm install && cd frontend && npm install && cd ../worker && pip install -r requirements.txt",
     "install:frontend": "cd frontend && npm install",
-    "install:queue": "cd queue && npm install",
     "install:worker": "cd worker && pip install -r requirements.txt",
-    "setup": "powershell -ExecutionPolicy Bypass -File setup-docker.ps1",
-    "docker:up": "docker-compose up -d",
-    "docker:down": "docker-compose down",
-    "docker:restart": "docker-compose restart",
-    "docker:logs": "docker-compose logs -f",
-    "docker:clean": "docker-compose down -v && docker system prune -f",
-    "dev": "concurrently \"npm run dev:queue\" \"npm run dev:frontend\" \"npm run dev:worker\"",
+    "setup": "powershell -ExecutionPolicy Bypass -File setup-env.ps1",
+    "dev": "concurrently \"npm run dev:worker\" \"npm run dev:frontend\"",
     "dev:frontend": "cd frontend && npm run dev",
-    "dev:queue": "cd queue && npm run dev",
     "dev:worker": "cd worker && python main.py",
-    "build": "npm run build:queue && npm run build:frontend",
-    "build:frontend": "cd frontend && npm run build",
-    "build:queue": "cd queue && npm run build",
-    "start": "concurrently \"npm run start:queue\" \"npm run start:frontend\"",
-    "start:frontend": "cd frontend && npm run start",
-    "start:queue": "cd queue && npm run start",
-    "start-dev": "powershell -ExecutionPolicy Bypass -File start-dev.ps1",
+    "start": "concurrently \"npm run start:worker\" \"npm run start:frontend\"",
+    "start:frontend": "cd frontend && npm start",
+    "start:worker": "cd worker && python main.py",
     "worker": "cd worker && python main.py",
-    "clean": "npm run clean:frontend && npm run clean:queue",
+    "clean": "npm run clean:frontend",
     "clean:frontend": "cd frontend && rm -rf .next dist",
-    "clean:queue": "cd queue && rm -rf dist",
-    "test-system": "powershell -ExecutionPolicy Bypass -File test-system.ps1",
-    "type-check": "cd queue && npm run type-check && cd ../frontend && npx tsc --noEmit"
+    "type-check": "cd frontend && npx tsc --noEmit"
   },
   "devDependencies": {
     "concurrently": "^8.2.2"
   },
   "engines": {
     "node": ">=18.0.0",
-    "npm": ">=9.0.0"
-  }
+    "npm": ">=9.0.0",
+    "python": ">=3.8.0"
+  },
+  "keywords": [
+    "selenium",
+    "automation",
+    "langchain",
+    "ai",
+    "web-scraping",
+    "project-generation",
+    "react",
+    "nextjs",
+    "fastapi"
+  ]
 }

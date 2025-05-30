@@ -49,8 +49,13 @@ export function TaskStatus({ taskId }: TaskStatusProps) {
         setError("");
 
         // Set initial code for editing
-        if (data.task.result?.generatedCode && !editedCode) {
-          setEditedCode(data.task.result.generatedCode);
+        if (
+          (data.task.finalCode || data.task.result?.generatedCode) &&
+          !editedCode
+        ) {
+          setEditedCode(
+            data.task.finalCode || data.task.result?.generatedCode || ""
+          );
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : "An error occurred");
@@ -243,7 +248,7 @@ export function TaskStatus({ taskId }: TaskStatusProps) {
         </div>
       </div>
 
-      {task.result?.generatedCode && (
+      {(task.finalCode || task.result?.generatedCode) && (
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="font-semibold">Generated Code</h3>
@@ -261,7 +266,9 @@ export function TaskStatus({ taskId }: TaskStatusProps) {
                 size="sm"
                 onClick={() =>
                   copyToClipboard(
-                    isEditing ? editedCode : task.result!.generatedCode
+                    isEditing
+                      ? editedCode
+                      : task.finalCode || task.result!.generatedCode
                   )
                 }
               >
@@ -273,7 +280,9 @@ export function TaskStatus({ taskId }: TaskStatusProps) {
                 size="sm"
                 onClick={() =>
                   downloadCode(
-                    isEditing ? editedCode : task.result!.generatedCode
+                    isEditing
+                      ? editedCode
+                      : task.finalCode || task.result!.generatedCode
                   )
                 }
               >
@@ -320,7 +329,7 @@ export function TaskStatus({ taskId }: TaskStatusProps) {
             </div>
           ) : (
             <div className="bg-gray-900 rounded-lg p-4 text-green-400 font-mono text-sm max-h-96 overflow-auto">
-              <pre>{task.result.generatedCode}</pre>
+              <pre>{task.finalCode || task.result?.generatedCode}</pre>
             </div>
           )}
         </div>

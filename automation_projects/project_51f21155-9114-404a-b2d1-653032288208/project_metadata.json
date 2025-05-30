@@ -1,0 +1,30 @@
+{
+  "project_id": "51f21155-9114-404a-b2d1-653032288208",
+  "task": "Test case 2: Negative username test\n            Open page\n            Type username incorrectUser into Username field\n            Type password Password123 into Password field\n            Push Submit button\n            Verify error message is displayed\n            Verify error message text is Your username is invalid!",
+  "created_at": "2025-05-30T18:04:52.672920",
+  "structure": {
+    "directories": [
+      "project_51f21155-9114-404a-b2d1-653032288208",
+      "project_51f21155-9114-404a-b2d1-653032288208\\src",
+      "project_51f21155-9114-404a-b2d1-653032288208\\tests",
+      "project_51f21155-9114-404a-b2d1-653032288208\\docs",
+      "project_51f21155-9114-404a-b2d1-653032288208\\logs",
+      "project_51f21155-9114-404a-b2d1-653032288208\\screenshots",
+      "project_51f21155-9114-404a-b2d1-653032288208\\results",
+      "project_51f21155-9114-404a-b2d1-653032288208\\backups"
+    ],
+    "files": [
+      "src/main_automation.py",
+      "requirements.txt",
+      "src/config.py",
+      "tests/test_automation.py",
+      "README.md",
+      "Dockerfile",
+      "docker-compose.yml",
+      "src/utils.py",
+      "src/logging_config.py"
+    ]
+  },
+  "version": "1.0.0",
+  "status": "active"
+}

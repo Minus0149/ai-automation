@@ -1,0 +1,30 @@
+{
+  "project_id": "63cf5572-bc40-4c55-8c18-18bed0a54745",
+  "task": "Test case 1: Positive LogIn test\n            Open page\n            Type username student into Username field\n            Type password Password123 into Password field\n            Push Submit button\n            Verify new page URL contains practicetestautomation.com/logged-in-successfully/\n            Verify new page contains expected text ('Congratulations' or 'successfully logged in')\n            Verify button Log out is displayed on the new page",
+  "created_at": "2025-05-30T18:04:02.807776",
+  "structure": {
+    "directories": [
+      "project_63cf5572-bc40-4c55-8c18-18bed0a54745",
+      "project_63cf5572-bc40-4c55-8c18-18bed0a54745\\src",
+      "project_63cf5572-bc40-4c55-8c18-18bed0a54745\\tests",
+      "project_63cf5572-bc40-4c55-8c18-18bed0a54745\\docs",
+      "project_63cf5572-bc40-4c55-8c18-18bed0a54745\\logs",
+      "project_63cf5572-bc40-4c55-8c18-18bed0a54745\\screenshots",
+      "project_63cf5572-bc40-4c55-8c18-18bed0a54745\\results",
+      "project_63cf5572-bc40-4c55-8c18-18bed0a54745\\backups"
+    ],
+    "files": [
+      "src/main_automation.py",
+      "requirements.txt",
+      "src/config.py",
+      "tests/test_automation.py",
+      "README.md",
+      "Dockerfile",
+      "docker-compose.yml",
+      "src/utils.py",
+      "src/logging_config.py"
+    ]
+  },
+  "version": "1.0.0",
+  "status": "active"
+}

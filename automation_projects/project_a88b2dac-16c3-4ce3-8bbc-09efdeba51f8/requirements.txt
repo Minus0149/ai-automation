@@ -1,0 +1,40 @@
+# Core automation dependencies
+selenium==4.15.2
+webdriver-manager==4.0.1
+
+# Web scraping and HTML parsing
+requests==2.31.0
+beautifulsoup4==4.12.2
+lxml==4.9.3
+html5lib==1.1
+
+# Session management and HTTP handling
+requests-session==0.1.0
+urllib3==2.1.0
+
+# Data handling and analysis
+pandas==2.1.4
+numpy==1.24.3
+
+# Image processing
+pillow==10.1.0
+
+# Enhanced logging and monitoring
+structlog==23.2.0
+colorlog==6.7.0
+
+# Testing framework
+pytest==7.4.3
+pytest-html==4.1.1
+
+# Utilities and configuration
+click==8.1.7
+python-dotenv==1.0.0
+pyyaml==6.0.1
+
+# JSON and XML processing
+jsonschema==4.20.0
+xmltodict==0.13.0
+
+# Browser automation fallbacks
+playwright==1.40.0  # Alternative to Selenium

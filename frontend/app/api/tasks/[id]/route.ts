@@ -67,7 +67,17 @@ export async function GET(
         updatedAt: taskWithAttempts.updatedAt || new Date(),
         completedAt: (taskWithAttempts as any).completedAt || null,
         executionTime: taskWithAttempts.result?.executionTime || null,
-        finalCode: taskWithAttempts.result?.generatedCode || null,
+        finalCode:
+          // Try to get final code from various sources
+          (taskWithAttempts.result as any)?.final_code ||
+          taskWithAttempts.result?.generatedCode ||
+          (taskWithAttempts.execution_result as any)?.final_code ||
+          (taskWithAttempts.execution_result as any)?.generated_code ||
+          (taskWithAttempts as any).generated_code ||
+          (attempts.length > 0
+            ? attempts[attempts.length - 1].generated_code
+            : null) ||
+          null,
         finalResult:
           taskWithAttempts.execution_result || taskWithAttempts.result,
         finalError: taskWithAttempts.result?.error || null,

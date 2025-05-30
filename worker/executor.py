@@ -1,783 +1,470 @@
-import logging
-import tempfile
-import os
-import sys
-import subprocess
-import base64
-import json
-import traceback
-import time
-from typing import Dict, List, Optional, Any
-from datetime import datetime
-from pathlib import Path
-import psutil
+"""
+Main Executor - Orchestrates all automation types
+Coordinates between different automation frameworks and LangChain agents
+"""
 
-# Resource module is Unix-specific, make it optional for Windows
+import os
+import time
+import json
+from typing import Dict, Any, Optional, List, Union
+from selenium import webdriver
+
+# Core executors
+from selenium_executor import SeleniumExecutor
+from dynamic_executor import DynamicAutomationExecutor
+from simple_enhanced_executor import SimpleEnhancedExecutor
+from comprehensive_automation_executor import ComprehensiveAutomationExecutor
+
+# LangChain integration
 try:
-    import resource
-    HAS_RESOURCE = True
+    from enhanced_langchain_executor import EnhancedLangChainExecutor
+    LANGCHAIN_AVAILABLE = True
 except ImportError:
-    # Windows doesn't have the resource module
-    HAS_RESOURCE = False
+    LANGCHAIN_AVAILABLE = False
+
+class AutomationExecutor:
+    """Main executor that orchestrates all automation types"""
     
-from threading import Timer
-import gc
-
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException, WebDriverException
-from webdriver_manager.chrome import ChromeDriverManager
-from bs4 import BeautifulSoup
-
-# Configure logging with Windows-compatible paths
-import platform
-
-# Use Windows-compatible temp directory
-TEMP_DIR = tempfile.gettempdir()
-LOG_FILE = os.path.join(TEMP_DIR, 'executor.log')
-
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] [%(name)s]: %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler(LOG_FILE)
-    ]
-)
-
-logger = logging.getLogger('selenium-executor')
-
-class ExecutionLog:
-    def __init__(self, timestamp: datetime, level: str, message: str, data: Optional[Dict[str, Any]] = None):
-        self.timestamp = timestamp
-        self.level = level
-        self.message = message
-        self.data = data
+    def __init__(self, llm=None):
+        # Initialize core executors
+        self.selenium_executor = SeleniumExecutor()
+        self.dynamic_executor = DynamicAutomationExecutor()
+        self.simple_enhanced_executor = SimpleEnhancedExecutor()
+        self.comprehensive_executor = ComprehensiveAutomationExecutor()
+        
+        # Initialize LangChain components if available
+        self.enhanced_executor = None
+        
+        if LANGCHAIN_AVAILABLE:
+            try:
+                self.enhanced_executor = EnhancedLangChainExecutor()
+                print("LangChain executor initialized successfully")
+            except Exception as e:
+                print(f"Warning: LangChain executor failed to initialize: {e}")
+        
+        self.current_session = None
+        self.execution_history = []
     
-    def to_dict(self):
-        return {
-            "timestamp": self.timestamp.isoformat(),
-            "level": self.level,
-            "message": self.message,
-            "data": self.data
+    def execute_automation(self, 
+                          url: str, 
+                          task_description: str, 
+                          framework: str = "auto", 
+                          use_langchain: bool = True,
+                          model_provider: str = "openai",
+                          model_name: str = "gpt-3.5-turbo") -> Dict[str, Any]:
+        """
+        Execute automation task with intelligent framework selection
+        """
+        start_time = time.time()
+        
+        # Record execution attempt
+        execution_record = {
+            "url": url,
+            "task": task_description,
+            "framework": framework,
+            "use_langchain": use_langchain,
+            "model_provider": model_provider,
+            "model_name": model_name,
+            "start_time": start_time,
+            "attempt_id": len(self.execution_history) + 1
         }
-
-class TaskStatus:
-    def __init__(self, task_id: str):
-        self.task_id = task_id
-        self.status = "running"
-        self.start_time = datetime.now()
-        self.process = None
-        self.logs: List[ExecutionLog] = []
-    
-    def add_log(self, level: str, message: str, data: Optional[Dict[str, Any]] = None):
-        log = ExecutionLog(datetime.now(), level, message, data)
-        self.logs.append(log)
-        logger.log(getattr(logging, level.upper(), logging.INFO), f"Task {self.task_id}: {message}")
-
-class ResourceMonitor:
-    def __init__(self, max_memory_mb: int = 512, max_cpu_percent: int = 80):
-        self.max_memory_mb = max_memory_mb
-        self.max_cpu_percent = max_cpu_percent
-        self.process = psutil.Process()
         
-    def check_resources(self):
-        """Check if resource usage is within limits."""
         try:
-            memory_usage = self.process.memory_info().rss / 1024 / 1024  # MB
-            cpu_percent = self.process.cpu_percent()
+            # Determine best execution approach
+            if framework == "auto":
+                framework = self._determine_best_framework(task_description, use_langchain)
             
-            if memory_usage > self.max_memory_mb:
-                logger.warning(f"Memory usage {memory_usage:.2f}MB exceeds limit {self.max_memory_mb}MB")
-                return False, f"Memory limit exceeded: {memory_usage:.2f}MB"
-                
-            if cpu_percent > self.max_cpu_percent:
-                logger.warning(f"CPU usage {cpu_percent:.2f}% exceeds limit {self.max_cpu_percent}%")
-                return False, f"CPU limit exceeded: {cpu_percent:.2f}%"
-                
-            return True, f"Memory: {memory_usage:.2f}MB, CPU: {cpu_percent:.2f}%"
-            
-        except Exception as e:
-            logger.error(f"Resource monitoring error: {e}")
-            return True, "Resource monitoring failed"
-
-def cleanup_selenium_resources(driver):
-    """Comprehensive cleanup of Selenium resources."""
-    try:
-        if driver:
-            # Close all windows
-            for handle in driver.window_handles:
-                driver.switch_to.window(handle)
-                driver.close()
-            
-            # Quit the driver
-            driver.quit()
-            
-        # Force garbage collection
-        gc.collect()
-        
-        # Kill any remaining browser processes
-        for proc in psutil.process_iter(['pid', 'name']):
-            try:
-                if any(name in proc.info['name'].lower() for name in ['chrome', 'chromium', 'firefox', 'gecko']):
-                    proc.terminate()
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                pass
-                
-    except Exception as e:
-        logger.error(f"Cleanup error: {e}")
-
-class SeleniumExecutor:
-    """Executes Selenium automation scripts in a sandboxed environment."""
-    
-    def __init__(self):
-        self.active_tasks: Dict[str, TaskStatus] = {}
-        self.sandbox_dir = os.path.join(TEMP_DIR, "selenium_sandbox")
-        self.screenshots_dir = os.path.join(TEMP_DIR, "screenshots")
-        self.max_execution_time = 120  # 2 minutes
-        self.setup_directories()
-        self.driver = None
-        self.setup_chrome_options()
-        logger.info("SeleniumExecutor initialized")
-        
-    def setup_directories(self):
-        """Setup sandbox and screenshots directories."""
-        try:
-            os.makedirs(self.sandbox_dir, exist_ok=True)
-            os.makedirs(self.screenshots_dir, exist_ok=True)
-            logger.info(f"Directories created: {self.sandbox_dir}, {self.screenshots_dir}")
-        except Exception as e:
-            logger.error(f"Failed to create directories: {e}")
-            raise
-    
-    def setup_chrome_options(self):
-        """Setup Chrome options for headless execution"""
-        self.chrome_options = Options()
-        self.chrome_options.add_argument("--headless")
-        self.chrome_options.add_argument("--no-sandbox")
-        self.chrome_options.add_argument("--disable-dev-shm-usage")
-        self.chrome_options.add_argument("--disable-gpu")
-        self.chrome_options.add_argument("--window-size=1920,1080")
-        self.chrome_options.add_argument("--disable-extensions")
-        self.chrome_options.add_argument("--disable-plugins")
-        self.chrome_options.add_argument("--disable-images")
-        self.chrome_options.add_argument("--disable-javascript")
-        self.chrome_options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-
-    def get_driver(self):
-        """Get or create a Chrome WebDriver instance"""
-        if self.driver is None:
-            try:
-                # Set up Chrome options
-                options = self.get_chrome_options()
-                
-                # Enhanced ChromeDriver path resolution
-                driver_path = None
-                
-                # Method 1: Try ChromeDriverManager first
+            # Update model if using enhanced executor
+            if self.enhanced_executor and use_langchain:
                 try:
-                    from webdriver_manager.chrome import ChromeDriverManager
-                    logger.info("Attempting ChromeDriverManager...")
-                    
-                    manager_path = ChromeDriverManager().install()
-                    logger.info(f"ChromeDriverManager returned: {manager_path}")
-                    
-                    # Validate the path on Windows
-                    if sys.platform.startswith('win'):
-                        if manager_path and not manager_path.endswith('chromedriver.exe'):
-                            logger.info("ChromeDriverManager returned invalid path, searching for correct file...")
-                            
-                            # Get the base directory
-                            base_dir = os.path.dirname(manager_path)
-                            if not os.path.exists(base_dir):
-                                base_dir = manager_path
-                            
-                            # Search directories
-                            search_dirs = [
-                                base_dir,
-                                os.path.dirname(base_dir),
-                                os.path.join(base_dir, "chromedriver-win32"),
-                                os.path.join(os.path.dirname(base_dir), "chromedriver-win32"),
-                            ]
-                            
-                            found = False
-                            for search_dir in search_dirs:
-                                if not os.path.exists(search_dir):
-                                    continue
-                                    
-                                logger.info(f"Searching in: {search_dir}")
-                                
-                                # Walk through directory tree
-                                for root, dirs, files in os.walk(search_dir):
-                                    for file in files:
-                                        if file == 'chromedriver.exe':
-                                            test_path = os.path.join(root, file)
-                                            
-                                            # Validate the executable
-                                            if (os.path.exists(test_path) and 
-                                                os.access(test_path, os.X_OK) and 
-                                                os.path.getsize(test_path) > 1000000):  # > 1MB
-                                                
-                                                driver_path = test_path
-                                                logger.info(f"Found valid chromedriver.exe: {driver_path}")
-                                                found = True
-                                                break
-                                    if found:
-                                        break
-                                if found:
-                                    break
-                        else:
-                            # Path looks good, validate it
-                            if (os.path.exists(manager_path) and 
-                                os.access(manager_path, os.X_OK) and 
-                                os.path.getsize(manager_path) > 1000000):
-                                driver_path = manager_path
-                                logger.info(f"ChromeDriverManager path validated: {driver_path}")
-                                
-                except Exception as manager_error:
-                    logger.error(f"ChromeDriverManager failed: {manager_error}")
-                
-                # Method 2: If ChromeDriverManager failed, try system PATH
-                if not driver_path:
-                    logger.info("Trying system PATH for chromedriver...")
-                    import shutil
-                    system_driver = shutil.which('chromedriver')
-                    if system_driver and os.path.exists(system_driver):
-                        driver_path = system_driver
-                        logger.info(f"Found chromedriver in system PATH: {driver_path}")
-                
-                # Method 3: Manual search in common locations
-                if not driver_path:
-                    logger.info("Searching common ChromeDriver locations...")
-                    
-                    common_paths = [
-                        os.path.expanduser("~/.wdm/drivers/chromedriver"),
-                        "C:\\chromedriver\\chromedriver.exe",
-                        "C:\\Program Files\\chromedriver\\chromedriver.exe",
-                        "C:\\Program Files (x86)\\chromedriver\\chromedriver.exe",
-                        os.path.join(os.getcwd(), "chromedriver.exe"),
-                    ]
-                    
-                    for path in common_paths:
-                        if os.path.exists(path):
-                            if path.endswith('.exe'):
-                                test_path = path
-                            else:
-                                # Search in directory
-                                for root, dirs, files in os.walk(path):
-                                    for file in files:
-                                        if file == 'chromedriver.exe':
-                                            test_path = os.path.join(root, file)
-                                            break
-                            
-                            if (os.path.exists(test_path) and 
-                                os.access(test_path, os.X_OK) and 
-                                os.path.getsize(test_path) > 1000000):
-                                driver_path = test_path
-                                logger.info(f"Found chromedriver in common location: {driver_path}")
-                                break
-                
-                # Final validation
-                if not driver_path or not os.path.exists(driver_path):
-                    raise Exception("No valid ChromeDriver found anywhere")
-                
-                if not os.access(driver_path, os.X_OK):
-                    raise Exception(f"ChromeDriver is not executable: {driver_path}")
-                
-                if os.path.getsize(driver_path) < 1000000:
-                    raise Exception(f"ChromeDriver file too small: {driver_path}")
-                
-                logger.info(f"Using verified ChromeDriver: {driver_path}")
-                
-                # Create service with verified driver path
-                from selenium.webdriver.chrome.service import Service
-                service = Service(driver_path)
-                
-                self.driver = webdriver.Chrome(service=service, options=options)
-                logger.info("✅ Chrome WebDriver created successfully")
-                
-            except Exception as e:
-                logger.error(f"❌ Failed to create Chrome WebDriver: {str(e)}")
-                raise
+                    self.enhanced_executor.switch_model(model_provider, model_name)
+                except Exception as e:
+                    print(f"Warning: Could not switch model: {e}")
+            
+            # Execute based on framework choice
+            result = None
+            if framework == "comprehensive":
+                result = self._execute_comprehensive_automation(url, task_description)
+            elif framework == "enhanced" and self.enhanced_executor and use_langchain:
+                result = self._execute_enhanced_automation(url, task_description)
+            elif framework == "simple_enhanced":
+                result = self._execute_simple_enhanced_automation(url, task_description)
+            elif framework == "dynamic":
+                result = self._execute_dynamic_automation(url, task_description)
+            else:  # Default to selenium
+                result = self._execute_selenium_automation(url, task_description)
+            
+            # Add execution metadata
+            if result:
+                result["execution_time"] = time.time() - start_time
+                result["framework_used"] = framework
+                result["langchain_enabled"] = use_langchain and LANGCHAIN_AVAILABLE
+                result["model_info"] = {
+                    "provider": model_provider,
+                    "model": model_name
+                }
+            
+            # Record result
+            execution_record.update({
+                "success": result.get("success", False) if result else False,
+                "execution_time": result.get("execution_time", 0) if result else 0,
+                "framework_used": framework,
+                "end_time": time.time()
+            })
+            
+            self.execution_history.append(execution_record)
+            
+            return result or {"success": False, "error": "No result returned"}
 
-        return self.driver
-
-    def close_driver(self):
-        """Close the WebDriver instance"""
-        if self.driver:
-            self.driver.quit()
-            self.driver = None
-    
-    async def initialize(self):
-        """Initialize the executor"""
-        # Ensure Chrome driver is available
-        try:
-            self.chrome_driver_path = ChromeDriverManager().install()
-            logger.info(f"Chrome driver available at: {self.chrome_driver_path}")
         except Exception as e:
-            logger.error(f"Failed to install Chrome driver: {e}")
-            raise
+            error_result = {
+                "success": False,
+                "error": f"Execution failed: {str(e)}",
+                "url": url,
+                "task": task_description,
+                "framework": framework,
+                "execution_time": time.time() - start_time
+            }
+            
+            execution_record.update({
+                "success": False,
+                "error": str(e),
+                "execution_time": error_result["execution_time"],
+                "end_time": time.time()
+            })
+            
+            self.execution_history.append(execution_record)
+            
+            return error_result
     
-    async def cleanup(self):
-        """Clean up resources"""
-        # Cancel all active tasks
-        for task_id in list(self.active_tasks.keys()):
-            self.cancel_task(task_id)
+    def _determine_best_framework(self, task_description: str, use_langchain: bool) -> str:
+        """Intelligently determine the best framework for the task"""
+        task_lower = task_description.lower()
         
-        # Clean up sandbox directory
-        if self.sandbox_dir and self.sandbox_dir.exists():
-            import shutil
-            shutil.rmtree(self.sandbox_dir)
-            logger.info("Cleaned up sandbox directory")
+        # Chat/conversation indicators
+        chat_indicators = ["chat", "conversation", "ask", "help", "explain"]
         
-        # Close the WebDriver
-        self.close_driver()
-    
-    def create_selenium_script(self, user_code: str, website_url: str) -> str:
-        """Creates a complete Selenium script with proper setup and teardown."""
-        logger.info(f"Creating Selenium script for website: {website_url}")
+        # Complex tasks that benefit from LangChain
+        complex_indicators = [
+            "plan", "strategy", "multiple steps", "if", "then", "complex", 
+            "analyze", "understand", "intelligent", "decision", "choose"
+        ]
         
-        # Use Windows-compatible temp directory
-        windows_temp = TEMP_DIR.replace('\\', '/')
+        # Project generation indicators
+        project_indicators = ["project", "generate", "create", "build", "structure"]
         
-        # Properly indent user code to fit in the try block
-        indented_user_code = self._indent_code(user_code, 4)
+        # Dynamic automation indicators
+        dynamic_indicators = [
+            "find", "search", "locate", "detect", "smart", "adaptive"
+        ]
         
-        script_template = f'''
-import sys
-import os
-import time
-import json
-import logging
-import traceback
-from datetime import datetime
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
-from selenium.common.exceptions import *
-from webdriver_manager.chrome import ChromeDriverManager
-
-# Setup logging for the script
-logging.basicConfig(level=logging.INFO)
-script_logger = logging.getLogger('selenium_script')
-
-# Results dictionary
-execution_result = {{
-    "success": False,
-    "logs": [],
-    "screenshots": [],
-    "error": None,
-    "execution_time": 0,
-    "start_time": datetime.now().isoformat()
-}}
-
-def log_info(message):
-    script_logger.info(message)
-    execution_result["logs"].append({{
-        "level": "info",
-        "message": str(message),
-        "timestamp": datetime.now().isoformat()
-    }})
-
-def log_error(message):
-    script_logger.error(message)
-    execution_result["logs"].append({{
-        "level": "error", 
-        "message": str(message),
-        "timestamp": datetime.now().isoformat()
-    }})
-
-def log_warning(message):
-    script_logger.warning(message)
-    execution_result["logs"].append({{
-        "level": "warning",
-        "message": str(message),
-        "timestamp": datetime.now().isoformat()
-    }})
-
-def take_screenshot(driver, name="screenshot"):
-    try:
-        screenshot_path = r"{windows_temp}\\screenshots\\{{name}}_{{int(time.time())}}.png"
-        os.makedirs(os.path.dirname(screenshot_path), exist_ok=True)
-        driver.save_screenshot(screenshot_path)
-        execution_result["screenshots"].append(screenshot_path)
-        log_info(f"Screenshot saved: {{screenshot_path}}")
-        return screenshot_path
-    except Exception as e:
-        log_error(f"Failed to take screenshot: {{e}}")
-        return None
-
-start_time = time.time()
-
-try:
-    log_info("Starting Selenium automation script")
-    
-    # Setup Chrome options
-    chrome_options = Options()
-    chrome_options.add_argument("--headless")
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("--disable-gpu")
-    chrome_options.add_argument("--window-size=1920,1080")
-    chrome_options.add_argument("--disable-extensions")
-    chrome_options.add_argument("--disable-plugins")
-    chrome_options.add_argument("--disable-images")
-    chrome_options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-    
-    # Initialize WebDriver
-    log_info("Initializing Chrome WebDriver")
-    service = Service(ChromeDriverManager().install())
-    driver = webdriver.Chrome(service=service, options=chrome_options)
-    driver.set_page_load_timeout(30)
-    driver.implicitly_wait(10)
-    
-    # Navigate to website
-    log_info(f"Navigating to: {website_url}")
-    driver.get("{website_url}")
-    
-    # Take initial screenshot
-    take_screenshot(driver, "initial")
-    log_info(f"Successfully loaded: {{driver.title}}")
-    
-    # Execute user code
-    log_info("Executing user automation code")
-{indented_user_code}
-    
-    # Take final screenshot
-    take_screenshot(driver, "final")
-    
-    execution_result["success"] = True
-    execution_result["execution_time"] = time.time() - start_time
-    log_info(f"Script executed successfully in {{execution_result['execution_time']:.2f}} seconds")
-
-except TimeoutException as e:
-    execution_result["error"] = f"Timeout error: {{str(e)}}"
-    log_error(execution_result["error"])
-    if 'driver' in locals():
-        take_screenshot(driver, "timeout_error")
-
-except NoSuchElementException as e:
-    execution_result["error"] = f"Element not found: {{str(e)}}"
-    log_error(execution_result["error"])
-    if 'driver' in locals():
-        take_screenshot(driver, "element_not_found")
-
-except WebDriverException as e:
-    execution_result["error"] = f"WebDriver error: {{str(e)}}"
-    log_error(execution_result["error"])
-
-except Exception as e:
-    execution_result["error"] = f"Unexpected error: {{str(e)}}"
-    log_error(execution_result["error"])
-    log_error(f"Traceback: {{traceback.format_exc()}}")
-    if 'driver' in locals():
-        take_screenshot(driver, "error")
-
-finally:
-    try:
-        if 'driver' in locals():
-            log_info("Closing WebDriver")
-            driver.quit()
-    except Exception as e:
-        log_error(f"Error closing driver: {{e}}")
-    
-    execution_result["execution_time"] = time.time() - start_time
-    
-    # Save results to file
-    result_file = r"{windows_temp}\\execution_result.json"
-    os.makedirs(os.path.dirname(result_file), exist_ok=True)
-    with open(result_file, "w") as f:
-        json.dump(execution_result, f, indent=2)
-    
-    log_info("Script execution completed")
-'''
+        # Simple automation tasks
+        simple_indicators = [
+            "click", "type", "fill", "submit", "navigate", "scroll"
+        ]
         
-        logger.info("Selenium script template created successfully")
-        return script_template
-    
-    def execute_script(self, code: str, website_url: str, timeout: int = 60) -> Dict[str, Any]:
-        """Execute Selenium code in a sandboxed environment."""
-        logger.info(f"Starting script execution for {website_url}")
-        execution_start = time.time()
+        if any(indicator in task_lower for indicator in chat_indicators):
+            return "comprehensive"
         
+        if any(indicator in task_lower for indicator in project_indicators):
+            if use_langchain and LANGCHAIN_AVAILABLE and self.enhanced_executor:
+                return "enhanced"
+            else:
+                return "simple_enhanced"
+        
+        if use_langchain and LANGCHAIN_AVAILABLE and self.enhanced_executor:
+            if any(indicator in task_lower for indicator in complex_indicators):
+                return "enhanced"
+        
+        if any(indicator in task_lower for indicator in dynamic_indicators):
+            return "dynamic"
+        
+        return "selenium"  # Default fallback
+    
+    def _execute_selenium_automation(self, url: str, task_description: str) -> Dict[str, Any]:
+        """Execute using basic Selenium"""
         try:
-            # Create the complete script
-            full_script = self.create_selenium_script(code, website_url)
+            result = self.selenium_executor.execute_automation(
+                url=url,
+                actions=[{"type": "navigate", "url": url}]
+            )
             
-            # Create temporary script file
-            script_path = os.path.join(self.sandbox_dir, f"script_{int(time.time())}.py")
+            result["approach"] = "selenium_basic"
+            result["task"] = task_description
             
-            with open(script_path, 'w') as f:
-                f.write(full_script)
+            return result
+                    
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"Selenium automation failed: {str(e)}",
+                "approach": "selenium_basic"
+            }
+    
+    def _execute_dynamic_automation(self, url: str, task_description: str) -> Dict[str, Any]:
+        """Execute using dynamic automation"""
+        try:
+            result = self.dynamic_executor.execute_automation(
+                prompt=task_description,
+                website_url=url,
+                framework="selenium"
+            )
             
-            logger.info(f"Script written to: {script_path}")
+            result["approach"] = "dynamic_automation"
             
-            # Execute script in subprocess
-            result = self._run_script_subprocess(script_path, timeout)
+            return result
+                
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"Dynamic automation failed: {str(e)}",
+                "approach": "dynamic_automation"
+            }
+    
+    def _execute_simple_enhanced_automation(self, url: str, task_description: str) -> Dict[str, Any]:
+        """Execute using simple enhanced automation"""
+        try:
+            task_id = f"task_{int(time.time())}"
+            result = self.simple_enhanced_executor.execute_automation(
+                prompt=task_description,
+                website_url=url,
+                framework="selenium",
+                task_id=task_id
+            )
             
-            # Clean up script file
-            try:
-                os.remove(script_path)
-                logger.info(f"Cleaned up script file: {script_path}")
-            except Exception as e:
-                logger.warning(f"Failed to clean up script file: {e}")
+            result["approach"] = "simple_enhanced"
             
-            execution_time = time.time() - execution_start
-            result["total_execution_time"] = execution_time
+            return result
+                
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"Simple enhanced automation failed: {str(e)}",
+                "approach": "simple_enhanced"
+            }
+    
+    def _execute_enhanced_automation(self, url: str, task_description: str) -> Dict[str, Any]:
+        """Execute using enhanced LangChain executor"""
+        try:
+            task_id = f"task_{int(time.time())}"
+            result = self.enhanced_executor.execute_automation(
+                prompt=task_description,
+                website_url=url,
+                framework="selenium",
+                task_id=task_id
+            )
             
-            logger.info(f"Script execution completed in {execution_time:.2f} seconds")
+            result["approach"] = "enhanced_langchain"
+            
             return result
             
         except Exception as e:
-            logger.error(f"Error in execute_script: {e}")
-            logger.error(f"Traceback: {traceback.format_exc()}")
-            
             return {
                 "success": False,
-                "error": f"Execution error: {str(e)}",
-                "logs": [
-                    {
-                        "level": "error",
-                        "message": f"Execution failed: {str(e)}",
-                        "timestamp": datetime.now().isoformat()
-                    }
-                ],
-                "screenshots": [],
-                "execution_time": time.time() - execution_start
+                "error": f"Enhanced LangChain automation failed: {str(e)}",
+                "approach": "enhanced_langchain"
             }
     
-    def _run_script_subprocess(self, script_path: str, timeout: int) -> Dict[str, Any]:
-        """Run the script in a subprocess with timeout."""
-        logger.info(f"Running script subprocess with timeout: {timeout}s")
-        
+    def _execute_comprehensive_automation(self, url: str, task_description: str) -> Dict[str, Any]:
+        """Execute using comprehensive automation executor"""
         try:
-            # Run the script
-            process = subprocess.Popen(
-                [sys.executable, script_path],
-                cwd=self.sandbox_dir,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                env=dict(os.environ, PYTHONPATH="")
+            context = {"url": url} if url else {}
+            result = self.comprehensive_executor.chat_with_automation(
+                message=task_description,
+                context=context
             )
             
-            logger.info(f"Started subprocess with PID: {process.pid}")
+            result["approach"] = "comprehensive"
             
-            try:
-                stdout, stderr = process.communicate(timeout=timeout)
-                return_code = process.returncode
-                
-                logger.info(f"Subprocess completed with return code: {return_code}")
-                
-                if stderr:
-                    logger.warning(f"Subprocess stderr: {stderr}")
-                
-                # Try to read execution results
-                try:
-                    result_file = os.path.join(TEMP_DIR, "execution_result.json")
-                    with open(result_file, "r") as f:
-                        result = json.load(f)
-                    
-                    # Add subprocess output to logs
-                    if stdout:
-                        result["logs"].append({
-                            "level": "info",
-                            "message": f"Script output: {stdout}",
-                            "timestamp": datetime.now().isoformat()
-                        })
-                    
-                    if stderr:
-                        result["logs"].append({
-                            "level": "error", 
-                            "message": f"Script stderr: {stderr}",
-                            "timestamp": datetime.now().isoformat()
-                        })
-                    
-                    # Read screenshots
-                    result["screenshots"] = self._collect_screenshots()
-                    
-                    logger.info(f"Execution result: success={result.get('success')}")
-                    return result
-                    
-                except Exception as e:
-                    logger.error(f"Failed to read execution result: {e}")
-                    return {
-                        "success": False,
-                        "error": f"Failed to read execution result: {str(e)}",
-                        "logs": [
-                            {
-                                "level": "error",
-                                "message": f"Stdout: {stdout}",
-                                "timestamp": datetime.now().isoformat()
-                            },
-                            {
-                                "level": "error",
-                                "message": f"Stderr: {stderr}",
-                                "timestamp": datetime.now().isoformat()
-                            }
-                        ],
-                        "screenshots": [],
-                        "execution_time": 0
-                    }
-                    
-            except subprocess.TimeoutExpired:
-                logger.error(f"Script execution timed out after {timeout} seconds")
-                process.kill()
-                process.communicate()
-                
-                return {
-                    "success": False,
-                    "error": f"Script execution timed out after {timeout} seconds",
-                    "logs": [
-                        {
-                            "level": "error",
-                            "message": f"Execution timed out after {timeout} seconds",
-                            "timestamp": datetime.now().isoformat()
-                        }
-                    ],
-                    "screenshots": self._collect_screenshots(),
-                    "execution_time": timeout
-                }
-                
+            return result
+            
         except Exception as e:
-            logger.error(f"Error running subprocess: {e}")
-            logger.error(f"Traceback: {traceback.format_exc()}")
-            
             return {
                 "success": False,
-                "error": f"Subprocess error: {str(e)}",
-                "logs": [
-                    {
-                        "level": "error",
-                        "message": f"Subprocess error: {str(e)}",
-                        "timestamp": datetime.now().isoformat()
-                    }
-                ],
-                "screenshots": [],
-                "execution_time": 0
+                "error": f"Comprehensive automation failed: {str(e)}",
+                "approach": "comprehensive"
             }
     
-    def _collect_screenshots(self) -> List[str]:
-        """Collect all screenshots from the screenshots directory."""
-        screenshots = []
-        try:
-            if os.path.exists(self.screenshots_dir):
-                for file in os.listdir(self.screenshots_dir):
-                    if file.endswith('.png'):
-                        full_path = os.path.join(self.screenshots_dir, file)
-                        screenshots.append(full_path)
-                        
-            logger.info(f"Collected {len(screenshots)} screenshots")
-            return screenshots
-            
-        except Exception as e:
-            logger.error(f"Error collecting screenshots: {e}")
-            return []
-    
-    def get_task_status(self, task_id: str) -> Optional[Dict[str, Any]]:
-        """Get the status of a running task"""
-        task_status = self.active_tasks.get(task_id)
-        if not task_status:
-            return None
+    def execute_with_fallback(self, url: str, task_description: str, **kwargs) -> Dict[str, Any]:
+        """Execute with automatic fallback to simpler methods if advanced ones fail"""
+        frameworks_to_try = []
         
-        return {
-            "task_id": task_id,
-            "status": task_status.status,
-            "start_time": task_status.start_time.isoformat(),
-            "logs": [log.to_dict() for log in task_status.logs]
-        }
-    
-    def cancel_task(self, task_id: str) -> bool:
-        """Cancel a running task"""
-        task_status = self.active_tasks.get(task_id)
-        if not task_status:
-            return False
+        use_langchain = kwargs.get("use_langchain", True)
         
-        if task_status.process:
+        # Add frameworks in order of preference
+        frameworks_to_try.append("comprehensive")
+        
+        if use_langchain and LANGCHAIN_AVAILABLE and self.enhanced_executor:
+            frameworks_to_try.append("enhanced")
+        
+        frameworks_to_try.extend(["simple_enhanced", "dynamic", "selenium"])
+        
+        last_error = None
+        
+        for framework in frameworks_to_try:
             try:
-                # Kill the process and its children
-                parent = psutil.Process(task_status.process.pid)
-                for child in parent.children(recursive=True):
-                    child.kill()
-                parent.kill()
-                task_status.add_log("info", "Task cancelled by user")
-            except (psutil.NoSuchProcess, ProcessLookupError):
-                pass  # Process already terminated
+                print(f"Trying framework: {framework}")
+                
+                result = self.execute_automation(
+                    url=url,
+                    task_description=task_description,
+                    framework=framework,
+                    **kwargs
+                )
+                
+                if result.get("success"):
+                    result["fallback_used"] = framework != frameworks_to_try[0]
+                    result["frameworks_attempted"] = frameworks_to_try[:frameworks_to_try.index(framework) + 1]
+                    return result
+                else:
+                    last_error = result.get("error", "Unknown error")
+                    
+            except Exception as e:
+                last_error = str(e)
+                continue
         
-        task_status.status = "cancelled"
-        return True
-    
-    def list_active_tasks(self) -> List[Dict[str, Any]]:
-        """List all active tasks"""
-        return [
-            {
-                "task_id": task_id,
-                "status": task_status.status,
-                "start_time": task_status.start_time.isoformat()
-            }
-            for task_id, task_status in self.active_tasks.items()
-        ]
-
-    def is_ready(self) -> bool:
-        """Check if the executor is ready"""
-        try:
-            # Try to create a driver instance
-            test_driver = self.get_driver()
-            if test_driver:
-                self.close_driver()
-                return True
-            return False
-        except Exception:
-            return False
-
-    def check_chrome(self) -> bool:
-        """Check if Chrome is available"""
-        try:
-            ChromeDriverManager().install()
-            return True
-        except Exception:
-            return False
-
-    def _indent_code(self, code: str, spaces: int) -> str:
-        """Indent code by the specified number of spaces"""
-        lines = code.split('\n')
-        indented_lines = [' ' * spaces + line if line.strip() else line for line in lines]
-        return '\n'.join(indented_lines) 
-
-# Global executor instance
-executor = SeleniumExecutor()
-
-def execute_automation(code: str, website_url: str, timeout: int = 60) -> Dict[str, Any]:
-    """Main function to execute automation code."""
-    logger.info(f"Executing automation for {website_url}")
-    
-    try:
-        result = executor.execute_script(code, website_url, timeout)
-        
-        # Perform cleanup
-        executor.cleanup()
-        
-        return result
-        
-    except Exception as e:
-        logger.error(f"Error in execute_automation: {e}")
         return {
             "success": False,
-            "error": f"Automation execution failed: {str(e)}",
-            "logs": [
-                {
-                    "level": "error",
-                    "message": f"Automation execution failed: {str(e)}",
-                    "timestamp": datetime.now().isoformat()
+            "error": f"All frameworks failed. Last error: {last_error}",
+            "frameworks_attempted": frameworks_to_try,
+            "url": url,
+            "task": task_description
+        }
+    
+    def create_automation_plan(self, task_description: str, url: str = "") -> Dict[str, Any]:
+        """Create an automation plan using the best available planner"""
+        if self.enhanced_executor:
+            try:
+                # Use enhanced executor for planning
+                result = self.enhanced_executor._generate_automation_plan(
+                    task_description, url, "selenium"
+                )
+                return {
+                    "success": True,
+                    "plan": result,
+                    "planner": "enhanced_executor"
                 }
-            ],
-            "screenshots": [],
-            "execution_time": 0
-        } 
+            except Exception as e:
+                print(f"Enhanced planning failed: {e}")
+        
+        # Fallback to dynamic analysis
+        try:
+            # Simple plan structure
+            plan = {
+                "task": task_description,
+                "url": url,
+                "steps": [
+                    {"action": "navigate", "target": url},
+                    {"action": "analyze", "target": "page content"},
+                    {"action": "execute", "target": task_description}
+                ]
+            }
+            return {
+                "success": True,
+                "plan": plan,
+                "planner": "fallback_planner"
+            }
+        except Exception as e:
+            print(f"Fallback planning failed: {e}")
+        
+        return {
+            "success": False,
+            "error": "No planning capabilities available"
+        }
+    
+    def get_available_models(self) -> Dict[str, Any]:
+        """Get list of available AI models"""
+        if self.enhanced_executor:
+            try:
+                return self.enhanced_executor.get_available_models()
+            except Exception as e:
+                print(f"Failed to get models from enhanced executor: {e}")
+        
+        return {
+            "available": False,
+            "models": [],
+            "error": "Enhanced executor not available"
+        }
+    
+    def switch_model(self, provider: str, model_name: str) -> Dict[str, Any]:
+        """Switch the AI model for LangChain operations"""
+        if self.enhanced_executor:
+            try:
+                result = self.enhanced_executor.switch_model(provider, model_name)
+                return {
+                    "success": True,
+                    "provider": provider,
+                    "model": model_name,
+                    "result": result
+                }
+            except Exception as e:
+                return {
+                    "success": False,
+                    "error": f"Model switch failed: {str(e)}"
+                }
+        
+        return {
+            "success": False,
+            "error": "Enhanced executor not available"
+        }
+    
+    def get_execution_status(self) -> Dict[str, Any]:
+        """Get current execution status and capabilities"""
+        return {
+            "selenium_available": True,
+            "dynamic_automation_available": True,
+            "simple_enhanced_available": True,
+            "comprehensive_available": True,
+            "langchain_available": LANGCHAIN_AVAILABLE,
+            "enhanced_executor_available": self.enhanced_executor is not None,
+            "total_executions": len(self.execution_history),
+            "successful_executions": len([e for e in self.execution_history if e.get("success", False)]),
+            "current_session": self.current_session is not None
+        }
+    
+    def get_execution_history(self) -> List[Dict[str, Any]]:
+        """Get execution history"""
+        return self.execution_history
+    
+    def clear_history(self):
+        """Clear execution history"""
+        self.execution_history = []
+    
+    def close_all_sessions(self):
+        """Close all active automation sessions"""
+        try:
+            if self.selenium_executor:
+                self.selenium_executor.close_all_drivers()
+        except Exception as e:
+            print(f"Error closing selenium executor: {e}")
+        
+        try:
+            if self.dynamic_executor:
+                self.dynamic_executor.cleanup()
+        except Exception as e:
+            print(f"Error closing dynamic executor: {e}")
+        
+        try:
+            if self.simple_enhanced_executor:
+                self.simple_enhanced_executor.cleanup()
+        except Exception as e:
+            print(f"Error closing simple enhanced executor: {e}")
+        
+        try:
+            if self.comprehensive_executor:
+                self.comprehensive_executor.cleanup()
+        except Exception as e:
+            print(f"Error closing comprehensive executor: {e}")
+        
+        try:
+            if self.enhanced_executor:
+                self.enhanced_executor.cleanup()
+        except Exception as e:
+            print(f"Error closing enhanced executor: {e}")
+        
+        self.current_session = None
+
+# Factory function
+def create_automation_executor(llm=None) -> AutomationExecutor:
+    """Factory function to create an automation executor"""
+    return AutomationExecutor(llm=llm) 

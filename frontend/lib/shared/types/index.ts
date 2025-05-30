@@ -9,6 +9,7 @@ export interface AutomationTask {
   createdAt: Date;
   updatedAt: Date;
   result?: AutomationResult;
+  finalCode?: string;
 }
 
 export interface AutomationResult {

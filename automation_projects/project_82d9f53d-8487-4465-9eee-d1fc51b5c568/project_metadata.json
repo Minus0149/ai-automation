@@ -1,0 +1,30 @@
+{
+  "project_id": "82d9f53d-8487-4465-9eee-d1fc51b5c568",
+  "task": "test login functionality with username student and password Password123",
+  "created_at": "2025-05-30T18:20:02.239968",
+  "structure": {
+    "directories": [
+      "project_82d9f53d-8487-4465-9eee-d1fc51b5c568",
+      "project_82d9f53d-8487-4465-9eee-d1fc51b5c568\\src",
+      "project_82d9f53d-8487-4465-9eee-d1fc51b5c568\\tests",
+      "project_82d9f53d-8487-4465-9eee-d1fc51b5c568\\docs",
+      "project_82d9f53d-8487-4465-9eee-d1fc51b5c568\\logs",
+      "project_82d9f53d-8487-4465-9eee-d1fc51b5c568\\screenshots",
+      "project_82d9f53d-8487-4465-9eee-d1fc51b5c568\\results",
+      "project_82d9f53d-8487-4465-9eee-d1fc51b5c568\\backups"
+    ],
+    "files": [
+      "src/main_automation.py",
+      "requirements.txt",
+      "src/config.py",
+      "tests/test_automation.py",
+      "README.md",
+      "Dockerfile",
+      "docker-compose.yml",
+      "src/utils.py",
+      "src/logging_config.py"
+    ]
+  },
+  "version": "1.0.0",
+  "status": "active"
+}

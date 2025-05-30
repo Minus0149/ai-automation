@@ -1,0 +1,34 @@
+version: '3.8'
+
+services:
+  automation:
+    build: .
+    volumes:
+      - ./logs:/app/logs
+      - ./screenshots:/app/screenshots
+      - ./results:/app/results
+    environment:
+      - DISPLAY=:99
+      - PYTHONPATH=/app/src
+    networks:
+      - automation-network
+    restart: unless-stopped
+
+  # Optional: Add a VNC server for viewing browser in action
+  vnc:
+    image: selenium/standalone-chrome:latest
+    ports:
+      - "4444:4444"
+      - "5900:5900"
+    environment:
+      - VNC_NO_PASSWORD=1
+    networks:
+      - automation-network
+
+networks:
+  automation-network:
+    driver: bridge
+
+volumes:
+  automation-data:
+    driver: local

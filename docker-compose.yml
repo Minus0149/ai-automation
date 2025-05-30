@@ -2,127 +2,82 @@ version: "3.8"
 
 services:
   # ===========================================
-  # PostgreSQL Database Service
+  # Frontend Service (Next.js)
   # ===========================================
-  postgres:
-    image: postgres:15-alpine
-    container_name: ai-automation-postgres
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: ai-automation-frontend
     environment:
-      # Database Configuration
-      POSTGRES_DB: ai_automation
-      POSTGRES_USER: automation_user
-      POSTGRES_PASSWORD: automation_password_2024
-
-      # Performance Settings
-      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --auth-local=scram-sha-256"
-
-      # Development Settings (override in production)
-      # POSTGRES_PASSWORD: ${DB_PASSWORD:-automation_password_2024}
-      # POSTGRES_USER: ${DB_USER:-automation_user}
-      # POSTGRES_DB: ${DB_NAME:-ai_automation}
+      - NODE_ENV=production
+      - WORKER_URL=http://worker:8000
     ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./docker/init.sql:/docker-entrypoint-initdb.d/init.sql
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U automation_user -d ai_automation"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    restart: unless-stopped
-    networks:
-      - automation-network
-
-  # ===========================================
-  # Redis Cache & Queue Service
-  # ===========================================
-  redis:
-    image: redis:7-alpine
-    container_name: ai-automation-redis
-    command: redis-server --appendonly yes --requirepass redis_password_2024
-    environment:
-      # Redis Configuration
-      REDIS_PASSWORD: redis_password_2024
-
-      # Performance Settings
-      REDIS_MAXMEMORY: 256mb
-      REDIS_MAXMEMORY_POLICY: allkeys-lru
-
-      # Development Settings (override in production)
-      # REDIS_PASSWORD: ${REDIS_PASSWORD:-redis_password_2024}
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-      - ./docker/redis.conf:/usr/local/etc/redis/redis.conf
-    healthcheck:
-      test: ["CMD", "redis-cli", "-a", "redis_password_2024", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    restart: unless-stopped
-    networks:
-      - automation-network
-
-  # ===========================================
-  # PgAdmin Database Management UI
-  # ===========================================
-  pgadmin:
-    image: dpage/pgadmin4:latest
-    container_name: ai-automation-pgadmin
-    environment:
-      # PgAdmin Configuration
-      PGADMIN_DEFAULT_EMAIL: admin@automation.com
-      PGADMIN_DEFAULT_PASSWORD: admin_password_2024
-      PGADMIN_CONFIG_SERVER_MODE: "False"
-      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
-
-      # Development Settings (override in production)
-      # PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@automation.com}
-      # PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin_password_2024}
-
-      # Security Settings for Production
-      # PGADMIN_CONFIG_ENHANCED_COOKIE_PROTECTION: 'True'
-      # PGADMIN_CONFIG_LOGIN_BANNER: "Unauthorized access is prohibited"
-      # PGADMIN_CONFIG_CONSOLE_LOG_LEVEL: 40
-    ports:
-      - "8080:80"
-    volumes:
-      - pgadmin_data:/var/lib/pgadmin
-      - ./docker/servers.json:/pgadmin4/servers.json
+      - "3000:3000"
     depends_on:
-      postgres:
-        condition: service_healthy
+      - worker
     restart: unless-stopped
     networks:
       - automation-network
 
   # ===========================================
-  # Redis Commander Management UI
+  # Worker Service (Python FastAPI)
   # ===========================================
-  redis-commander:
-    image: rediscommander/redis-commander:latest
-    container_name: ai-automation-redis-ui
+  worker:
+    build:
+      context: ./worker
+      dockerfile: Dockerfile
+    container_name: ai-automation-worker
     environment:
-      # Redis Commander Configuration
-      REDIS_HOSTS: redis:redis:6379:0:redis_password_2024
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      REDIS_PASSWORD: redis_password_2024
+      # AI Model Configuration
+      - AI_MODEL_PROVIDER=${AI_MODEL_PROVIDER:-openai}
+      - AI_MODEL_NAME=${AI_MODEL_NAME:-gpt-3.5-turbo}
 
-      # UI Configuration
-      HTTP_USER: admin
-      HTTP_PASSWORD: redis_ui_password_2024
+      # API Keys
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - HUGGINGFACE_API_TOKEN=${HUGGINGFACE_API_TOKEN}
 
-      # Development Settings (override in production)
-      # REDIS_PASSWORD: ${REDIS_PASSWORD:-redis_password_2024}
-      # HTTP_PASSWORD: ${REDIS_UI_PASSWORD:-redis_ui_password_2024}
+      # LangChain Configuration
+      - LANGCHAIN_TRACING_V2=${LANGCHAIN_TRACING_V2:-false}
+      - LANGCHAIN_API_KEY=${LANGCHAIN_API_KEY}
+      - LANGCHAIN_PROJECT=${LANGCHAIN_PROJECT:-selenium-automation}
+
+      # Worker Configuration
+      - WORKER_PORT=8000
+      - WORKER_HOST=0.0.0.0
+
+      # Selenium Configuration
+      - SELENIUM_HEADLESS=true
+      - SELENIUM_TIMEOUT=60
+
+      # Automation Configuration
+      - DEFAULT_FRAMEWORK=selenium
+      - MAX_EXECUTION_TIME=300
+      - SCREENSHOT_ON_ERROR=true
     ports:
-      - "8081:8081"
-    depends_on:
-      redis:
-        condition: service_healthy
+      - "8000:8000"
+    volumes:
+      - ./worker/screenshots:/app/screenshots
+      - ./generated_projects:/app/generated_projects
+    restart: unless-stopped
+    networks:
+      - automation-network
+
+  # ===========================================
+  # ChromaDB for Vector Storage (Optional)
+  # ===========================================
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: ai-automation-chromadb
+    environment:
+      - CHROMA_SERVER_HOST=0.0.0.0
+      - CHROMA_SERVER_PORT=8001
+    ports:
+      - "8001:8001"
+    volumes:
+      - chromadb_data:/chroma/chroma
     restart: unless-stopped
     networks:
       - automation-network
@@ -131,14 +86,8 @@ services:
 # Persistent Data Volumes
 # ===========================================
 volumes:
-  postgres_data:
-    name: ai_automation_postgres_data
-    driver: local
-  redis_data:
-    name: ai_automation_redis_data
-    driver: local
-  pgadmin_data:
-    name: ai_automation_pgadmin_data
+  chromadb_data:
+    name: ai_automation_chromadb_data
     driver: local
 
 # ===========================================
@@ -152,40 +101,24 @@ networks:
       config:
         - subnet: 172.20.0.0/16
 # ===========================================
-# Environment Variable Examples
+# Environment Configuration
 # ===========================================
 #
-# For Production Deployment:
-# 1. Create .env file in project root with:
-#    DB_PASSWORD=secure_production_password
-#    DB_USER=prod_user
-#    DB_NAME=ai_automation_prod
-#    REDIS_PASSWORD=secure_redis_password
-#    PGADMIN_EMAIL=admin@yourcompany.com
-#    PGADMIN_PASSWORD=secure_pgadmin_password
-#    REDIS_UI_PASSWORD=secure_redis_ui_password
+# Create a .env file with your API keys:
 #
-# 2. Use environment variable substitution:
-#    POSTGRES_PASSWORD: ${DB_PASSWORD}
-#    REDIS_PASSWORD: ${REDIS_PASSWORD}
+# # AI Model Configuration
+# AI_MODEL_PROVIDER=openai
+# AI_MODEL_NAME=gpt-3.5-turbo
 #
-# 3. Security Considerations:
-#    - Change all default passwords
-#    - Use strong passwords (min 16 characters)
-#    - Enable SSL/TLS for external access
-#    - Restrict network access with firewall rules
-#    - Use Docker secrets for sensitive data
-#    - Enable audit logging
+# # API Keys
+# OPENAI_API_KEY=your_openai_api_key_here
+# ANTHROPIC_API_KEY=your_anthropic_api_key_here
+# GOOGLE_API_KEY=your_google_api_key_here
+# HUGGINGFACE_API_TOKEN=your_huggingface_token_here
 #
-# 4. Performance Tuning:
-#    - Increase memory limits for production
-#    - Configure PostgreSQL shared_buffers
-#    - Set Redis maxmemory based on usage
-#    - Use read replicas for scaling
+# # LangChain Configuration (Optional)
+# LANGCHAIN_TRACING_V2=true
+# LANGCHAIN_API_KEY=your_langchain_api_key_here
+# LANGCHAIN_PROJECT=selenium-automation
 #
-# 5. Monitoring:
-#    - Add health check endpoints
-#    - Configure log aggregation
-#    - Set up metrics collection
-#    - Enable alerting for failures
 # ===========================================

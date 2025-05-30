@@ -6,127 +6,26 @@ version: "3.8"
 
 services:
   # ===========================================
-  # PostgreSQL Database Service (Production)
+  # Frontend Service (Production)
   # ===========================================
-  postgres:
-    image: postgres:15-alpine
-    container_name: ai-automation-postgres-prod
-    environment:
-      # Production Database Configuration
-      POSTGRES_DB: ${DB_NAME:-ai_automation_prod}
-      POSTGRES_USER: ${DB_USER:-automation_user}
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
-
-      # Security Settings
-      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --auth-local=scram-sha-256"
-
-      # Performance Settings
-      POSTGRES_SHARED_BUFFERS: "256MB"
-      POSTGRES_EFFECTIVE_CACHE_SIZE: "1GB"
-      POSTGRES_MAINTENANCE_WORK_MEM: "64MB"
-      POSTGRES_CHECKPOINT_COMPLETION_TARGET: "0.9"
-      POSTGRES_WAL_BUFFERS: "16MB"
-      POSTGRES_DEFAULT_STATISTICS_TARGET: "100"
-    ports:
-      - "${DB_PORT:-5432}:5432"
-    volumes:
-      - postgres_data_prod:/var/lib/postgresql/data
-      - ./docker/init.sql:/docker-entrypoint-initdb.d/init.sql
-      - ./docker/postgres-prod.conf:/etc/postgresql/postgresql.conf
-    command: postgres -c config_file=/etc/postgresql/postgresql.conf
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "pg_isready -U ${DB_USER:-automation_user} -d ${DB_NAME:-ai_automation_prod}",
-        ]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
-    restart: unless-stopped
-    networks:
-      - automation-network-prod
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-
-  # ===========================================
-  # Redis Cache & Queue Service (Production)
-  # ===========================================
-  redis:
-    image: redis:7-alpine
-    container_name: ai-automation-redis-prod
-    command: redis-server /usr/local/etc/redis/redis.conf --requirepass ${REDIS_PASSWORD}
-    environment:
-      # Production Redis Configuration
-      REDIS_PASSWORD: ${REDIS_PASSWORD}
-      REDIS_MAXMEMORY: ${REDIS_MAXMEMORY:-2gb}
-      REDIS_MAXMEMORY_POLICY: ${REDIS_MAXMEMORY_POLICY:-allkeys-lru}
-    ports:
-      - "${REDIS_PORT:-6379}:6379"
-    volumes:
-      - redis_data_prod:/data
-      - ./docker/redis-prod.conf:/usr/local/etc/redis/redis.conf
-    healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
-    restart: unless-stopped
-    networks:
-      - automation-network-prod
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-
-  # ===========================================
-  # Queue Processor Service (Production)
-  # ===========================================
-  queue-processor:
+  frontend:
     build:
-      context: ./queue
-      dockerfile: Dockerfile.prod
-    container_name: ai-automation-queue-prod
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        - NODE_ENV=production
+    container_name: ai-automation-frontend-prod
     environment:
-      # Database Configuration
-      DATABASE_URL: "postgresql://${DB_USER:-automation_user}:${DB_PASSWORD}@postgres:5432/${DB_NAME:-ai_automation_prod}?sslmode=require"
-      DB_HOST: postgres
-      DB_PORT: 5432
-      DB_NAME: ${DB_NAME:-ai_automation_prod}
-      DB_USER: ${DB_USER:-automation_user}
-      DB_PASSWORD: ${DB_PASSWORD}
-
-      # Redis Configuration
-      REDIS_URL: "redis://:${REDIS_PASSWORD}@redis:6379"
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      REDIS_PASSWORD: ${REDIS_PASSWORD}
-
-      # OpenAI Configuration
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
-      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4}
-
-      # Worker Configuration
-      WORKER_URL: ${WORKER_URL:-http://worker:8000}
-
-      # Production Settings
-      NODE_ENV: production
-      LOG_LEVEL: ${LOG_LEVEL:-warn}
-      QUEUE_CONCURRENCY: ${QUEUE_CONCURRENCY:-5}
-      MAX_CONCURRENT_JOBS: ${MAX_CONCURRENT_JOBS:-10}
+      # Frontend Configuration
+      - NODE_ENV=production
+      - WORKER_URL=http://worker:8000
+      - NEXT_PUBLIC_API_URL=${FRONTEND_API_URL:-https://api.yourdomain.com}
+      - NEXTAUTH_URL=${FRONTEND_URL:-https://yourdomain.com}
+      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET}
     ports:
-      - "${QUEUE_PORT:-3000}:3000"
+      - "${FRONTEND_PORT:-3000}:3000"
     depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+      - worker
     restart: unless-stopped
     networks:
       - automation-network-prod
@@ -142,26 +41,50 @@ services:
   worker:
     build:
       context: ./worker
-      dockerfile: Dockerfile.prod
+      dockerfile: Dockerfile
+      args:
+        - PYTHON_ENV=production
     container_name: ai-automation-worker-prod
     environment:
+      # AI Model Configuration
+      - AI_MODEL_PROVIDER=${AI_MODEL_PROVIDER:-openai}
+      - AI_MODEL_NAME=${AI_MODEL_NAME:-gpt-3.5-turbo}
+
+      # API Keys
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - HUGGINGFACE_API_TOKEN=${HUGGINGFACE_API_TOKEN}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://ollama:11434}
+
+      # LangChain Configuration
+      - LANGCHAIN_TRACING_V2=${LANGCHAIN_TRACING_V2:-false}
+      - LANGCHAIN_API_KEY=${LANGCHAIN_API_KEY}
+      - LANGCHAIN_PROJECT=${LANGCHAIN_PROJECT:-selenium-automation-prod}
+
       # Worker Configuration
-      HOST: 0.0.0.0
-      PORT: 8000
-      WORKER_TIMEOUT: ${WORKER_TIMEOUT:-120}
+      - WORKER_PORT=8000
+      - WORKER_HOST=0.0.0.0
+      - WORKER_TIMEOUT=${WORKER_TIMEOUT:-300}
 
       # Selenium Configuration
-      HEADLESS: true
-      CHROME_DRIVER_PATH: /usr/local/bin/chromedriver
+      - SELENIUM_HEADLESS=true
+      - SELENIUM_TIMEOUT=${SELENIUM_TIMEOUT:-60}
+      - CHROME_DRIVER_PATH=/usr/local/bin/chromedriver
+
+      # Automation Configuration
+      - DEFAULT_FRAMEWORK=${DEFAULT_FRAMEWORK:-selenium}
+      - MAX_EXECUTION_TIME=${MAX_EXECUTION_TIME:-300}
+      - SCREENSHOT_ON_ERROR=true
 
       # Production Settings
-      PYTHON_ENV: production
-      LOG_LEVEL: ${LOG_LEVEL:-warn}
-      MAX_EXECUTION_TIME: ${MAX_EXECUTION_TIME:-300}
+      - PYTHON_ENV=production
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
     ports:
       - "${WORKER_PORT:-8000}:8000"
     volumes:
       - worker_screenshots_prod:/app/screenshots
+      - worker_projects_prod:/app/generated_projects
       - worker_logs_prod:/app/logs
     restart: unless-stopped
     networks:
@@ -173,31 +96,19 @@ services:
         max-file: "3"
 
   # ===========================================
-  # Frontend Service (Production)
+  # ChromaDB for Vector Storage (Production)
   # ===========================================
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile.prod
-    container_name: ai-automation-frontend-prod
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: ai-automation-chromadb-prod
     environment:
-      # Frontend Configuration
-      NEXT_PUBLIC_API_URL: ${FRONTEND_API_URL:-https://api.yourdomain.com}
-      NEXTAUTH_URL: ${FRONTEND_URL:-https://yourdomain.com}
-      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
-
-      # Database Configuration (for API routes)
-      DATABASE_URL: "postgresql://${DB_USER:-automation_user}:${DB_PASSWORD}@postgres:5432/${DB_NAME:-ai_automation_prod}?sslmode=require"
-
-      # Production Settings
-      NODE_ENV: production
+      - CHROMA_SERVER_HOST=0.0.0.0
+      - CHROMA_SERVER_PORT=8001
+      - CHROMA_SERVER_CORS_ALLOW_ORIGINS=["*"]
     ports:
-      - "${FRONTEND_PORT:-3001}:3000"
-    depends_on:
-      postgres:
-        condition: service_healthy
-      queue-processor:
-        condition: service_started
+      - "${CHROMADB_PORT:-8001}:8001"
+    volumes:
+      - chromadb_data_prod:/chroma/chroma
     restart: unless-stopped
     networks:
       - automation-network-prod
@@ -208,7 +119,36 @@ services:
         max-file: "3"
 
   # ===========================================
-  # Nginx Reverse Proxy (Production)
+  # Ollama Service (Optional - for local models)
+  # ===========================================
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ai-automation-ollama-prod
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    volumes:
+      - ollama_data_prod:/root/.ollama
+    restart: unless-stopped
+    networks:
+      - automation-network-prod
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # Uncomment if you want to use GPU acceleration
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+  # ===========================================
+  # Nginx Reverse Proxy (Optional)
   # ===========================================
   nginx:
     image: nginx:alpine
@@ -217,11 +157,11 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - ./docker/nginx.conf:/etc/nginx/nginx.conf
-      - ./docker/ssl:/etc/nginx/ssl
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./nginx/ssl:/etc/nginx/ssl
     depends_on:
       - frontend
-      - queue-processor
+      - worker
     restart: unless-stopped
     networks:
       - automation-network-prod
@@ -232,80 +172,74 @@ services:
         max-file: "3"
 
 # ===========================================
-# Production Data Volumes
+# Persistent Data Volumes (Production)
 # ===========================================
 volumes:
-  postgres_data_prod:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${DATA_DIR:-./data}/postgres
-  redis_data_prod:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${DATA_DIR:-./data}/redis
   worker_screenshots_prod:
+    name: ai_automation_screenshots_prod
     driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${DATA_DIR:-./data}/screenshots
+  worker_projects_prod:
+    name: ai_automation_projects_prod
+    driver: local
   worker_logs_prod:
+    name: ai_automation_logs_prod
     driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${DATA_DIR:-./data}/logs
+  chromadb_data_prod:
+    name: ai_automation_chromadb_prod
+    driver: local
+  ollama_data_prod:
+    name: ai_automation_ollama_prod
+    driver: local
 
 # ===========================================
-# Production Network Configuration
+# Docker Network Configuration (Production)
 # ===========================================
 networks:
   automation-network-prod:
+    name: ai_automation_network_prod
     driver: bridge
     ipam:
       config:
         - subnet: 172.21.0.0/16
 # ===========================================
-# Production Environment Variables Required
+# Production Environment Configuration
 # ===========================================
 #
-# Create .env.prod file with these variables:
+# Create a .env.prod file with your production settings:
 #
-# # Database Configuration
-# DB_PASSWORD=your_secure_production_password
-# DB_USER=prod_automation_user
-# DB_NAME=ai_automation_prod
+# # AI Model Configuration
+# AI_MODEL_PROVIDER=openai
+# AI_MODEL_NAME=gpt-4
 #
-# # Redis Configuration
-# REDIS_PASSWORD=your_secure_redis_password
-# REDIS_MAXMEMORY=2gb
+# # API Keys (REQUIRED)
+# OPENAI_API_KEY=your_production_openai_key
+# ANTHROPIC_API_KEY=your_production_anthropic_key
+# GOOGLE_API_KEY=your_production_google_key
+# HUGGINGFACE_API_TOKEN=your_production_hf_token
 #
-# # OpenAI Configuration
-# OPENAI_API_KEY=sk-your-production-openai-key
+# # LangChain Configuration
+# LANGCHAIN_TRACING_V2=true
+# LANGCHAIN_API_KEY=your_langchain_key
+# LANGCHAIN_PROJECT=selenium-automation-prod
 #
-# # Security Configuration
-# NEXTAUTH_SECRET=your-super-secure-nextauth-secret-64-chars-minimum
-# JWT_SECRET=your-super-secure-jwt-secret-64-chars-minimum
-#
-# # URLs and Domains
+# # Frontend Configuration
 # FRONTEND_URL=https://yourdomain.com
 # FRONTEND_API_URL=https://api.yourdomain.com
-# WORKER_URL=https://worker.yourdomain.com
+# NEXTAUTH_SECRET=your_secure_nextauth_secret
 #
-# # Performance Configuration
-# QUEUE_CONCURRENCY=5
-# MAX_CONCURRENT_JOBS=10
-# WORKER_TIMEOUT=120
+# # Worker Configuration
+# WORKER_TIMEOUT=300
+# MAX_EXECUTION_TIME=600
+# LOG_LEVEL=INFO
 #
-# # Data Storage
-# DATA_DIR=/opt/ai-automation-data
+# # Port Configuration
+# FRONTEND_PORT=3000
+# WORKER_PORT=8000
+# CHROMADB_PORT=8001
+# OLLAMA_PORT=11434
 #
-# # SSL Configuration (if using HTTPS)
-# SSL_CERT_PATH=/etc/ssl/certs/yourdomain.crt
-# SSL_KEY_PATH=/etc/ssl/private/yourdomain.key
+# # Security Settings
+# SELENIUM_TIMEOUT=120
+# DEFAULT_FRAMEWORK=selenium
 #
 # ===========================================

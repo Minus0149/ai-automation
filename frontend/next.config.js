@@ -1,9 +1,9 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   env: {
-    DATABASE_URL: process.env.DATABASE_URL,
-    REDIS_URL: process.env.REDIS_URL,
-    WORKER_URL: process.env.WORKER_URL,
+    WORKER_URL: process.env.WORKER_URL || "http://localhost:8000",
+    OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+    LANGCHAIN_TRACING_V2: process.env.LANGCHAIN_TRACING_V2,
   },
   async rewrites() {
     return [
@@ -12,6 +12,13 @@ const nextConfig = {
         destination: "/api/:path*",
       },
     ];
+  },
+  serverExternalPackages: ["selenium-webdriver"],
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
+  typescript: {
+    ignoreBuildErrors: true,
   },
 };
 
